@@ -42,7 +42,10 @@ export function flatMap(ast, fn) {
                 }
                 //#51297 Add Start 下線文字色対応
                 if (node.children[sCnt] && node.children[sCnt].type === 'text' ) {
-                    if(/\*</.test(node.children[sCnt].value)) {
+                    // #56408 表示できないページの対応 Mod Start
+                    //if(/\*</.test(node.children[sCnt].value)) {
+                    if(/\*<span/.test(node.children[sCnt].value) || /\*<u/.test(node.children[sCnt].value )) {
+                    // #56408 表示できないページの対応 Mod End
                         // 太文字かイタリックが存在した場合（下線or文字色と同時の場合のみ）
                         subTransFormStrong(node,sCnt);
                     }
@@ -82,6 +85,14 @@ export function flatMap(ast, fn) {
                         out.push(...transformedChildren);
                         break;
                     //#49455 Add End リンク付き画像対応
+                    } else if (nthChild.type === 'text' && /@\[osf\]\(/.test(nthChild.value)) {
+                        // Handle @[osf](GUID) format
+                        const transformed = transformOsfImage(nthChild);
+                        if (transformed && transformed.length > 0) {
+                            out.push(...transformed);
+                        } else {
+                            addTransformedChildren(nthChild, uLineCnt, node, out);
+                        }
                     } else {
                         addTransformedChildren(nthChild, uLineCnt, node, out);
                     }
@@ -101,6 +112,47 @@ export function flatMap(ast, fn) {
             }
         }
     }
+
+  function transformOsfImage(textNode) {
+      // @[osf](GUID) のパターン
+      const osfImagePattern = /@\[osf\]\(([a-zA-Z0-9]{5,})\)/g;
+      const text = textNode.value;
+      const matches = [];
+      let lastIndex = 0;
+      let match;
+
+      while ((match = osfImagePattern.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+            matches.push({ type: 'text', value: text.substring(lastIndex, match.index) });
+        }
+
+        // @[osf](GUID)からURLを作る
+        const guid = match[1];
+        const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
+        let imageUrl = osfURL + guid + '/?action=download&mode=render';
+
+        const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
+
+        if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
+            imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
+        }
+
+        matches.push({
+            type: 'image',
+            alt: guid,
+            url: imageUrl
+        });
+
+        lastIndex = osfImagePattern.lastIndex;
+    }
+
+    // Add remaining text after the last match
+    if (lastIndex < text.length) {
+        matches.push({ type: 'text', value: text.substring(lastIndex) });
+    }
+
+      return matches.length > 0 ? matches : null;
+  }
 
   function transformImageSection(remainingChildren) {
       const result = [];
@@ -291,12 +343,27 @@ export function flatMap(ast, fn) {
     function subTransFormStrong(node,startCnt){
         var remainingChildren = [];
         var remainingChildren2 = [];
-        var frontStr = node.children[startCnt].value.replace(/\*{1,3}<.*/,'');       // アスタリスク前
+        // #56408 ページが表示できない件の対応 Mod Start
+        //var frontStr = node.children[startCnt].value.replace(/\*{1,3}<.*/,'');       // アスタリスク前
+        // 開始位置を把握
+        var frontStr = '';
+        if(/\*<span/.test(node.children[startCnt].value)){
+            frontStr = node.children[startCnt].value.replace(/\*{1,3}<span.*/,'');
+        }else if(/\*<u/.test(node.children[startCnt].value )) {
+            frontStr = node.children[startCnt].value.replace(/\*{1,3}<u.*/,'');
+        }else{
+            return;
+        }
+        // #56408 ページが表示できない件の対応 Mod End
         var endCnt = startCnt;
         var strChildren = [];
         // 終わりの場所を調べる
         for(var i=startCnt ; i<node.children.length ; i++){
-            if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
+            // #56408 ページが表示できない件の対応 Mod Start
+            //if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
+            const v = node.children[i].value;
+            if (v && (/.*\u>\*{1,3}/.test(v) || /.*\span>\*{1,3}/.test(v))) {
+                // #56408 ページが表示できない件の対応 Mod End
                 endCnt = i;
                 break;
             }
@@ -377,6 +444,11 @@ export function flatMap(ast, fn) {
             // #54864 開始タグと終了タグのみだった場合の対応
             }else if(itemData[j] !== '' && itemData[j].startsWith('\>')){
                 tmpText = '<' + itemData[j];
+                // #56280 blockquoteと文字装飾の対応
+                if(tmpText.startsWith('<>')){
+                    tmpText = itemData[j];
+                }
+                // #56280 blockquoteと文字装飾の対応
                 tmpNode.push({type: 'text' ,value : tmpText});
                 tmpText = '';
             // #54864 開始タグと終了タグのみだった場合の対応
