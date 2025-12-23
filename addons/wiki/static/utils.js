@@ -3,7 +3,7 @@
 function isParent(node) {
     return !!(node && node.children && Array.isArray(node.children));
   }
-  
+
 export function isLiteral(node) {
     return !!(node && typeof node.value === 'string');
   }
@@ -23,33 +23,91 @@ export function flatMap(ast, fn) {
                 }
             }
             //#51315 Add End 訂正線とコードブロック対応
-            for (var sCnt = 0 ; sCnt < node.children.length ; sCnt++) {
-               // @[osf](GUID)形式のリンクを画像ノードに変換（エンコードされていない形式）
-                if (node.children[sCnt] && node.children[sCnt].type === 'link' &&
-                    node.children[sCnt].url && /^[a-zA-Z0-9]{5,}$/.test(node.children[sCnt].url) &&
-                    node.children[sCnt].children && node.children[sCnt].children.length > 0 &&
-                    node.children[sCnt].children[0] && node.children[sCnt].children[0].type === 'text' &&
-                    node.children[sCnt].children[0].value === 'osf' &&
-                    sCnt > 0 && node.children[sCnt - 1] && node.children[sCnt - 1].type === 'text' &&
-                    node.children[sCnt - 1].value === '@') {
-                    // @[osf](GUID)形式を画像ノードに変換
-                    const guid = node.children[sCnt].url;
-                    const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
-                    let imageUrl = osfURL + guid + '/?action=download&mode=render';
-                    const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
-                    if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
-                        imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
+            // リスト項目内の見出しを先に処理（他の処理より先に実行）
+            if (node.type && (node.type === 'listItem' || node.type === 'bulletListItem' || node.type === 'orderedListItem')) {
+                for (var listCnt = 0; listCnt < node.children.length; listCnt++) {
+                    if (node.children[listCnt]) {
+                        // 段落ノードの場合
+                        if (node.children[listCnt].type === 'paragraph' && node.children[listCnt].children && node.children[listCnt].children.length > 0) {
+                            // 段落内のすべての子要素を確認
+                            for (var paraCnt = 0; paraCnt < node.children[listCnt].children.length; paraCnt++) {
+                                const paragraphChild = node.children[listCnt].children[paraCnt];
+                                if (paragraphChild && paragraphChild.type === 'text' && paragraphChild.value) {
+                                    const textValue = paragraphChild.value;
+                                    // #で始まる見出し記法を検出
+                                    if (/^#{1,6}\s/.test(textValue)) {
+                                        // 段落ノード全体を見出しノードに置き換え
+                                        const headingMatch = textValue.match(/^(#{1,6})\s(.+)$/);
+                                        if (headingMatch) {
+                                            const level = headingMatch[1].length;
+                                            const headingText = headingMatch[2];
+                                            // 見出しノードを作成
+                                            const headingNode = {
+                                                type: 'heading',
+                                                level: level,
+                                                children: [{ type: 'text', value: headingText }]
+                                            };
+                                            // 段落ノードを直接見出しノードに置き換え
+                                            node.children[listCnt] = headingNode;
+                                        }
+                                        // 変換後はループを抜ける
+                                        listCnt = node.children.length; // 外側のループも抜ける
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // テキストノードの場合（直接テキストが含まれている場合）
+                        else if (node.children[listCnt].type === 'text' && node.children[listCnt].value) {
+                            const textValue = node.children[listCnt].value;
+                            // #で始まる見出し記法を検出
+                            if (/^#{1,6}\s/.test(textValue)) {
+                                transformListItemHeading(node, listCnt);
+                                break; // 変換後はループを抜ける
+                            }
+                        }
                     }
-                    // @テキストノードとリンクノードを画像ノードに置き換え
-                    node.children.splice(sCnt - 1, 2, {
-                        type: 'image',
-                        alt: guid,
-                        url: imageUrl
-                    });
-                    sCnt--; // インデックスを調整
-                    continue;
                 }
+            }
+            for (var sCnt = 0 ; sCnt < node.children.length ; sCnt++) {
                 //#48569 Add Start 子アンカー対応
+                // @[osf](GUID)形式のリンクを画像ノードに変換（エンコードされていない形式）
+                try {
+                    if (node.children[sCnt] && node.children[sCnt].type === 'link' &&
+                        node.children[sCnt].url && /^[a-zA-Z0-9]{5,}$/.test(node.children[sCnt].url) &&
+                        node.children[sCnt].children && node.children[sCnt].children.length > 0 &&
+                        node.children[sCnt].children[0] && node.children[sCnt].children[0].type === 'text' &&
+                        node.children[sCnt].children[0].value === 'osf' &&
+                        sCnt > 0 && node.children[sCnt - 1] && node.children[sCnt - 1].type === 'text' &&
+                        node.children[sCnt - 1].value === '@') {
+                        // @[osf](GUID)形式を画像ノードに変換
+                        const guid = node.children[sCnt].url;
+                        const osfURL = (typeof window !== 'undefined' && window.contextVars && window.contextVars.osfURL) ? window.contextVars.osfURL : '';
+                        let imageUrl = osfURL + guid + '/?action=download&mode=render';
+                        const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
+                        if ($osfHelper && $osfHelper.urlParams) {
+                            try {
+                                const urlParams = $osfHelper.urlParams();
+                                if (urlParams && urlParams.view_only) {
+                                    imageUrl += '&view_only=' + urlParams.view_only;
+                                }
+                            } catch (e) {
+                                // urlParams()がエラーを返す場合は無視
+                            }
+                        }
+                        // @テキストノードとリンクノードを画像ノードに置き換え
+                        node.children.splice(sCnt - 1, 2, {
+                            type: 'image',
+                            alt: guid,
+                            url: imageUrl
+                        });
+                        sCnt--; // インデックスを調整
+                        continue;
+                    }
+                } catch (e) {
+                    // エラーが発生した場合は処理を続行（Wikiの表示を妨げない）
+                    console.error('Error processing @[osf] link:', e);
+                }
                 if (node.children[sCnt] && node.children[sCnt].type === 'link') {
 
                     // URLにアンカーが存在する場合
@@ -66,7 +124,7 @@ export function flatMap(ast, fn) {
                     }
                 }
                 //#51297 Add Start 下線文字色対応
-                if (node.children[sCnt] && node.children[sCnt].type === 'text' ) {
+                if (node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value ) {
                     // #56408 表示できないページの対応 Mod Start
                     //if(/\*</.test(node.children[sCnt].value)) {
                     if(/\*<span/.test(node.children[sCnt].value) || /\*<u/.test(node.children[sCnt].value )) {
@@ -74,23 +132,36 @@ export function flatMap(ast, fn) {
                         // 太文字かイタリックが存在した場合（下線or文字色と同時の場合のみ）
                         subTransFormStrong(node,sCnt);
                     }
-                    const indexULine = node.children[sCnt].value.indexOf('<u>');
-                    const indexColor = node.children[sCnt].value.indexOf('<span style=\"color\:');
-                    if(indexULine >= 0 && indexColor >=0){
-                        // どちらも存在した場合
-                        if(indexULine < indexColor){
-                            // 下線の方が先
+                    // subTransFormStrongでnode.childrenが変更される可能性があるため、再度チェック
+                    if (node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value && typeof node.children[sCnt].value === 'string') {
+                        const currentValue = node.children[sCnt].value;
+
+                        const indexULine = currentValue.indexOf('<u>');
+                        const indexColor = currentValue.indexOf('<span style=\"color\:');
+                        if(indexULine >= 0 && indexColor >=0){
+                            // どちらも存在した場合
+                            if(indexULine < indexColor){
+                                // 下線の方が先
+                                subTransForm(node,'u',sCnt);
+                            }else{
+                                // 文字色の方が先
+                                subTransForm(node, 'span',sCnt);
+                            }
+                        // 下線の場合
+                        }else if(/<u>/.test(currentValue)) {
                             subTransForm(node,'u',sCnt);
-                        }else{
-                            // 文字色の方が先
+                        // 文字色の場合
+                        }else if (/<span style=\"color\:/.test(currentValue)) {
                             subTransForm(node, 'span',sCnt);
                         }
-                    // 下線の場合
-                    }else if(/<u>/.test(node.children[sCnt].value)) {
-                        subTransForm(node,'u',sCnt);
-                    // 文字色の場合
-                    }else if (/<span style=\"color\:/.test(node.children[sCnt].value)) {
-                        subTransForm(node, 'span',sCnt);
+                    }
+                }
+                // 見出し内の太字対応
+                if (node.type && (node.type === 'heading' || node.type.startsWith('h')) && node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value) {
+                    const textValue = node.children[sCnt].value;
+                    // **で囲まれた太字を検出
+                    if (/\*\*.*?\*\*/.test(textValue)) {
+                        transformHeadingBold(node, sCnt);
                     }
                 }
             }
@@ -111,8 +182,7 @@ export function flatMap(ast, fn) {
                         break;
                     //#49455 Add End リンク付き画像対応
                     } else if (nthChild.type === 'text' && /@(?:\\\[|\[)osf(?:\\\]|\])\(/.test(nthChild.value)) {
-                    //} else if (nthChild.type === 'text' && /@\[osf\]\(/.test(nthChild.value)) {
-                        // Handle @[osf](GUID) format
+                        // Handle @[osf](GUID) format (both escaped and unescaped)
                         const transformed = transformOsfImage(nthChild);
                         if (transformed && transformed.length > 0) {
                             out.push(...transformed);
@@ -178,7 +248,7 @@ export function flatMap(ast, fn) {
     }
 
       return matches.length > 0 ? matches : null;
-  }
+    }
 
   function transformImageSection(remainingChildren) {
       const result = [];
@@ -199,38 +269,38 @@ export function flatMap(ast, fn) {
   }
 
   function getRemainingNode(startIdx, nodeChildren) {
-        var remainingChildren = [];
-        for (var i = startIdx; i < nodeChildren.length; i++) {
-            if (nodeChildren[i].type === 'text') {
-                if (nodeChildren[i].value.match(/.*!\[.*\]\($/)) {
-                    const matchBeforeImage = nodeChildren[i].value.match(/^(.*?)(!\[.*\]\()$/);
-                    if (matchBeforeImage[1] !== '') {
-                        const beforeImage = matchBeforeImage[1];
-                        const matchSize = beforeImage.match(/^(\s*=\d+\))(.*)$/);
-                        if (matchSize) {
-                            if (matchSize[1] !== '') {
-                                remainingChildren.push({ type: 'text', value: matchSize[1] });
-                            }
-                            if (matchSize[2] !== '') {
-                                remainingChildren.push({ type: 'text', value: matchSize[2] });
-                            }
-                        } else {
-                            remainingChildren.push({ type: 'text', value: beforeImage });
-                        }
-                    }
-                    remainingChildren.push({ type: 'text', value: matchBeforeImage[2] });
-                    continue;
-                } else if (nodeChildren[i].value.match(/^(\s*=\d+\))(.*)/)) {
-                    const match = nodeChildren[i].value.match(/^(\s*=\d+\))(.*)/);
-                    if (match) {
-                        if (match[1] !== '') {
-                            remainingChildren.push({ type: 'text', value: match[1] });
-                        }
-                        if (match[2] !== '') {
-                            remainingChildren.push({ type: 'text', value: match[2] });
-                        }
-                    }
-                    continue;
+      var remainingChildren = [];
+      for (var i = startIdx; i < nodeChildren.length; i++) {
+          if (nodeChildren[i].type === 'text') {
+              if (nodeChildren[i].value.match(/.*!\[.*\]\($/)) {
+                  const matchBeforeImage = nodeChildren[i].value.match(/^(.*?)(!\[.*\]\()$/);
+                  if (matchBeforeImage[1] !== '') {
+                      const beforeImage = matchBeforeImage[1];
+                      const matchSize = beforeImage.match(/^(\s*=\d+\))(.*)$/);
+                      if (matchSize) {
+                          if (matchSize[1] !== '') {
+                              remainingChildren.push({ type: 'text', value: matchSize[1] });
+                          }
+                          if (matchSize[2] !== '') {
+                              remainingChildren.push({ type: 'text', value: matchSize[2] });
+                          }
+                      } else {
+                          remainingChildren.push({ type: 'text', value: beforeImage });
+                      }
+                  }
+                  remainingChildren.push({ type: 'text', value: matchBeforeImage[2] });
+                  continue;
+              } else if (nodeChildren[i].value.match(/^(\s*=\d+\))(.*)/)) {
+                  const match = nodeChildren[i].value.match(/^(\s*=\d+\))(.*)/);
+                  if (match) {
+                      if (match[1] !== '') {
+                          remainingChildren.push({ type: 'text', value: match[1] });
+                      }
+                      if (match[2] !== '') {
+                          remainingChildren.push({ type: 'text', value: match[2] });
+                      }
+                  }
+                  continue;
 //#49455 Add Start リンク付き画像対応
                 }else if (nodeChildren[i].value.match(/!\[\]\(.*\)$/)) {
                     const matchBeforeImage = nodeChildren[i].value.match(/(.*=.*)/);
@@ -246,8 +316,8 @@ export function flatMap(ast, fn) {
 //#49455 Add End リンク付き画像対応
             }
             remainingChildren.push(nodeChildren[i]);
-        }
-        return remainingChildren;
+      }
+      return remainingChildren;
     }
 
     //#47039 Add Start 下線文字色対応
@@ -387,14 +457,14 @@ export function flatMap(ast, fn) {
         for(var i=startCnt ; i<node.children.length ; i++){
             // #56408 ページが表示できない件の対応 Mod Start
             //if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
-            const v = node.children[i].value;
+            const v = node.children[i] && node.children[i].value;
             if (v && (/.*\u>\*{1,3}/.test(v) || /.*\span>\*{1,3}/.test(v))) {
                 // #56408 ページが表示できない件の対応 Mod End
                 endCnt = i;
                 break;
             }
         }
-        var tailStr = node.children[endCnt].value.replace(/.*\>\*{1,3}/,'');   // アスタリスク後
+        var tailStr = node.children[endCnt] && node.children[endCnt].value ? node.children[endCnt].value.replace(/.*\>\*{1,3}/,'') : '';   // アスタリスク後
         if(endCnt >= 1 ){
             for(var tailCnt=1 ; tailCnt<endCnt ; tailCnt++){
                 strChildren.push(node.children[tailCnt]);
@@ -510,63 +580,187 @@ export function flatMap(ast, fn) {
     }
     //#47039 Add End 下線文字色対応
 
+    // 見出し内の太字変換処理
+    function transformHeadingBold(node, startCnt) {
+        const textValue = node.children[startCnt].value;
+        const boldPattern = /\*\*(.*?)\*\*/g;
+        const result = [];
+        let lastIndex = 0;
+        let match;
+
+        while ((match = boldPattern.exec(textValue)) !== null) {
+            // マッチ前のテキストを追加
+            if (match.index > lastIndex) {
+                result.push({ type: 'text', value: textValue.substring(lastIndex, match.index) });
+            }
+            // 太字ノードを追加
+            result.push({
+                type: 'strong',
+                children: [{ type: 'text', value: match[1] }]
+            });
+            lastIndex = match.index + match[0].length;
+        }
+        // 残りのテキストを追加
+        if (lastIndex < textValue.length) {
+            result.push({ type: 'text', value: textValue.substring(lastIndex) });
+        }
+
+        // 結果が1つ以上ある場合、元のノードを置き換え
+        if (result.length > 0) {
+            // 元のノードを削除
+            node.children.splice(startCnt, 1);
+            // 変換されたノードを挿入
+            Array.prototype.splice.apply(node.children, [startCnt, 0].concat(result));
+        }
+    }
+
+    // リスト項目内の見出し変換処理
+    function transformListItemHeading(node, startCnt, paraChildIndex) {
+        let textValue = null;
+        let targetNode = node.children[startCnt];
+        let isParagraph = false;
+
+        // 段落ノードの中のテキストを取得
+        if (targetNode && targetNode.type === 'paragraph' && targetNode.children && targetNode.children.length > 0) {
+            isParagraph = true;
+            // paraChildIndexが指定されている場合はそのインデックスを使用、そうでなければ最初の子要素を使用
+            const childIndex = paraChildIndex !== undefined ? paraChildIndex : 0;
+            const paragraphChild = targetNode.children[childIndex];
+            if (paragraphChild && paragraphChild.type === 'text' && paragraphChild.value) {
+                textValue = paragraphChild.value;
+            }
+        } else if (targetNode && targetNode.type === 'text' && targetNode.value) {
+            textValue = targetNode.value;
+        }
+
+        if (textValue) {
+            // #の数を数えて見出しレベルを決定
+            const headingMatch = textValue.match(/^(#{1,6})\s(.+)$/);
+            if (headingMatch) {
+                const level = headingMatch[1].length;
+                const headingText = headingMatch[2];
+                // 見出しノードを作成
+                const headingNode = {
+                    type: 'heading',
+                    level: level,
+                    children: [{ type: 'text', value: headingText }]
+                };
+
+                if (isParagraph) {
+                    // 段落ノードを直接見出しノードに置き換え
+                    node.children[startCnt] = headingNode;
+                } else {
+                    // 元のノードを削除
+                    node.children.splice(startCnt, 1);
+                    // 見出しノードを挿入
+                    Array.prototype.splice.apply(node.children, [startCnt, 0].concat([headingNode]));
+                }
+            }
+        }
+    }
+
     //#51315 Add Start 訂正線とコードブロック対応
     function deleteChange(node){
-        var startCnt = 0;
-        var endCnt = 0;
         var tmpNode = [];
-        var tmpNodeCh = [];
-        var tmpText = '';
+        var i = 0;
 
-        for(var i = 0 ; i < node.children.length ; i++) {
-            // 最初に見つかった取り消し線開始の場所を探す
-            for (var j = startCnt ; j < node.children.length ; j++) {
-                if (node.children[j] && node.children[j].type === 'text' && node.children[j].value.match((/.*\~\~.*$/))) {
-                    // 取り消し線が設定済みの場合
-                    startCnt = j;
-                    var tmpSText = node.children[j].value.substring(0,node.children[j].value.indexOf('\~\~'));
-                    if(tmpSText !== ''){
-                        tmpNode.push({type: 'text', value:tmpSText});
-                        node.children[j].value = node.children[j].value.replace(tmpSText+'\~\~','');
-                        if(!(node.children[j].value.match(/.*\~\~.*$/))){
-                            startCnt = startCnt + 1;
-                        }
-                    }else if(node.children[j].value.match(/\~\~.*$/)){
-                        //先頭から始まっていたら
-                        node.children[j].value = node.children[j].value.replace('\~\~','');
-                        if(!(node.children[j].value.match(/.*\~\~.*$/))){
-                            startCnt = startCnt + 1;
-                        }
-                    }
-                    var tmpEText = node.children[j].value.replace(tmpSText,'').replace('\~\~','');
-                    if(tmpEText !== ''){
-                        tmpNodeCh.push({type: 'text', value:tmpEText});
-                    }
-                    tmpNode.push({type: 'delete'});
-                    break;
-                }
-                tmpNode.push(node.children[j]);
+        while (i < node.children.length) {
+            var child = node.children[i];
+
+            // 取り消し線が含まれていない場合はそのまま追加
+            if (!child || child.type !== 'text' || !child.value.match(/.*\~\~.*$/)) {
+                tmpNode.push(child);
+                i++;
+                continue;
             }
 
-            // 最初に見つかった終わりの場所を探す
-            for (var sCnt = startCnt ; sCnt < node.children.length ; sCnt++) {
-                if (node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value.match((/.*\~\~.*$/))) {
-                    // 取り消し線が設定済みの場合
-                    endCnt = sCnt;
-                    tmpText = node.children[sCnt].value.replace('\~\~','');
-                    if(!(node.children[sCnt].value.endsWith('\~\~'))){
-                        // 最後が終了タグで終わっていなかったら
-                        tmpNode.push({type: 'text', value:tmpText});
-                    }
-                    break;
+            // 取り消し線の開始位置を探す
+            var startIndex = child.value.indexOf('~~');
+            if (startIndex === -1) {
+                tmpNode.push(child);
+                i++;
+                continue;
+            }
+
+            // 開始位置より前のテキストを追加
+            if (startIndex > 0) {
+                tmpNode.push({
+                    type: 'text',
+                    value: child.value.substring(0, startIndex)
+                });
+            }
+
+            // 取り消し線の終了位置を探す
+            var remainingText = child.value.substring(startIndex + 2);
+            var endIndex = remainingText.indexOf('~~');
+            var deleteNodeChildren = [];
+            var nextChildIndex = i;
+
+            if (endIndex !== -1) {
+                // 同じテキストノード内に終了タグがある場合
+                var deleteText = remainingText.substring(0, endIndex);
+                if (deleteText) {
+                    deleteNodeChildren.push({
+                        type: 'text',
+                        value: deleteText
+                    });
                 }
-                tmpNodeCh.push(node.children[sCnt]);
+                var afterText = remainingText.substring(endIndex + 2);
+                if (afterText) {
+                    // 残りのテキストを新しいノードとして追加
+                    tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                    tmpNode.push({
+                        type: 'text',
+                        value: afterText
+                    });
+                } else {
+                    tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                }
+                i++;
+            } else {
+                // 複数のノードにまたがる場合
+                if (remainingText) {
+                    deleteNodeChildren.push({
+                        type: 'text',
+                        value: remainingText
+                    });
+                }
+                i++;
+
+                // 終了タグを探す
+                while (i < node.children.length) {
+                    var nextChild = node.children[i];
+                    if (nextChild && nextChild.type === 'text' && nextChild.value.indexOf('~~') !== -1) {
+                        var endPos = nextChild.value.indexOf('~~');
+                        if (endPos > 0) {
+                            deleteNodeChildren.push({
+                                type: 'text',
+                                value: nextChild.value.substring(0, endPos)
+                            });
+                        }
+                        var afterEndText = nextChild.value.substring(endPos + 2);
+                        if (afterEndText) {
+                            tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                            tmpNode.push({
+                                type: 'text',
+                                value: afterEndText
+                            });
+                        } else {
+                            tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                        }
+                        i++;
+                        break;
+                    } else {
+                        deleteNodeChildren.push(nextChild);
+                        i++;
+                    }
+                }
+
+                // 終了タグが見つからなかった場合
+                if (i >= node.children.length && deleteNodeChildren.length > 0) {
+                    tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                }
             }
-            tmpNode[startCnt].children = tmpNodeCh;
-            if(i < endCnt){
-                i = endCnt;
-            }
-            startCnt = endCnt + 1;
         }
         return tmpNode;
     }
