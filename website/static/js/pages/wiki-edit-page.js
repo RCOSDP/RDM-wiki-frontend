@@ -228,3 +228,18 @@ $(document).unbind('keydown').bind('keydown', function (event) {
         }
     }
 });
+
+$(document).on('shown.bs.modal', '#alertInfo', function() {
+    $('#alertInfo ul li').each(function() {
+        var $li = $(this);
+        if (!$li.attr('title')) {
+            $li.attr('title', $li.text().trim());
+        }
+    });
+    $('#alertInfo #perFileDifinitionForm ul li div[name="WikiImportOperationPerName"]').each(function() {
+        var $div = $(this);
+        if (!$div.attr('title')) {
+            $div.attr('title', $div.text().trim());
+        }
+    });
+});
