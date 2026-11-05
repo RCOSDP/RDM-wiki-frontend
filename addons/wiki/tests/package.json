@@ -1,0 +1,13 @@
+{
+  "name": "wiki-tests",
+  "version": "1.0.0",
+  "description": "Wiki addon automated tests",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2"
+  }
+}

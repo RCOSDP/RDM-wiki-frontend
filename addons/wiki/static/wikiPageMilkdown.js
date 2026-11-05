@@ -380,8 +380,14 @@ async function createMEditor(editor, vm, template) {
         return ret;
     };
 
+    const wsToken = window.contextVars.wiki.metadata.yWebsocketToken;
+    const wsParams = wsToken ? { token: wsToken } : {};
+
     if (!wsProvider) {
-        wsProvider = new yWebsocket.WebsocketProvider(wsUrl, docId, doc, { disableBc: true });
+        wsProvider = new yWebsocket.WebsocketProvider(wsUrl, docId, doc, {
+            disableBc: true,
+            params: wsParams,
+        });
     }
 
     originalContent = template;
