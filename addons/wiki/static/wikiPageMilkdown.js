@@ -396,13 +396,8 @@ async function createMEditor(editor, vm, template) {
                 uploader,
                 enableHtmlFileUploader,
             }));
-            const debouncedMarkdownUpdated = $osf.debounce(async (ctx, markdown, prevMarkdown) => {
-                const compareWidgetElement = document.getElementById('compareWidget');
 
-                if (compareWidgetElement && compareWidgetElement.style.display !== 'none') {
-                    vm.viewVM.displaySource(markdown);
-                }
-
+            const debouncedUndoButtonUpdate = $osf.debounce(async (ctx) => {
                 const view = ctx.get(mCore.editorViewCtx);
                 const state = view.state;
                 const undoElement = document.getElementById('undoWiki');
@@ -413,7 +408,10 @@ async function createMEditor(editor, vm, template) {
                 }
             }, 300);
             ctx.get(mListener.listenerCtx).markdownUpdated((ctx, markdown, prevMarkdown) => {
-                debouncedMarkdownUpdated(ctx, markdown, prevMarkdown);
+                // Keep the live editor body in displaySource even while Compare is
+                // closed, so opening Compare after edits diffs against the edits.
+                vm.viewVM.displaySource(markdown);
+                debouncedUndoButtonUpdate(ctx);
             });
             ctx.update(mCore.editorViewOptionsCtx, (prev) => ({
                 ...prev,
@@ -658,7 +656,7 @@ var defaultOptions = {
     menuVisible: true,
     canEdit: true,
     viewVersion: 'current',
-    compareVersion: 'previous',
+    compareVersion: 'current',
     urls: {
         content: '',
         draft: '',
@@ -666,6 +664,27 @@ var defaultOptions = {
     },
     metadata: {}
 };
+
+// Normalize compare target to a dropdown option value.
+// Default / empty -> current (edit vs latest saved). Explicit previous -> prior version number.
+function resolveCompareVersion(compareVersion) {
+    if (!compareVersion) {
+        return 'current';
+    }
+    if (compareVersion !== 'previous') {
+        return String(compareVersion);
+    }
+    var select = document.getElementById('compareVersionSelect');
+    if (select) {
+        for (var i = 0; i < select.options.length; i++) {
+            var val = select.options[i].value;
+            if (val && val !== 'current') {
+                return val;
+            }
+        }
+    }
+    return 'current';
+}
 
 function ViewModel(options){
     var self = this;
@@ -696,7 +715,7 @@ function ViewModel(options){
     self.status = ko.observable('connecting');
     self.throttledStatus = ko.observable(self.status());
 
-    self.compareVersion = ko.observable(options.compareVersion);
+    self.compareVersion = ko.observable(resolveCompareVersion(options.compareVersion));
     self.viewVersion = ko.observable(options.viewVersion);
     self.draftURL = options.urls.draft;
     self.contentURL = options.urls.content;
@@ -881,13 +900,8 @@ function ViewModel(options){
         if (panel === 'compare') {
             if(display && self.compareVis()){
                 self.viewVersion('preview');
-                var toMarkdown = '';
-                mEdit.action((ctx) => {
-                    const view = ctx.get(mCore.editorViewCtx);
-                    const serializer = ctx.get(mCore.serializerCtx);
-                    toMarkdown = serializer(view.state.doc);
-                });
-                self.viewVM.displaySource(toMarkdown);
+                // Always use the live editor body as the "after" side of the diff.
+                self.viewVM.displaySource(getEditorMarkdown());
             }
         }
 
