@@ -402,7 +402,6 @@ async function createMEditor(editor, vm, template) {
                 if (compareWidgetElement && compareWidgetElement.style.display !== 'none') {
                     vm.viewVM.displaySource(markdown);
                 }
-
                 const view = ctx.get(mCore.editorViewCtx);
                 const state = view.state;
                 const undoElement = document.getElementById('undoWiki');
@@ -577,12 +576,10 @@ function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathj
                 mEditorFooterElement = document.getElementById('mEditorFooter');
                 wikiViewRenderElement = document.getElementById('wikiViewRender');
                 if (mMenuBarElement) mMenuBarElement.style.display = 'none';
+                // Hide the live editor while viewing another version. Do not destroy
+                // its DOM/instance; recreating collab state can leave an empty editor.
                 if (mEditorElement) {
                     mEditorElement.style.display = 'none';
-                    const milkdownDivs = mEditorElement.querySelectorAll('div.milkdown');
-                    if (milkdownDivs.length > 0) {
-                        milkdownDivs[0].remove();
-                    }
                 }
                 document.getElementById('mEditorFooter').style.display = 'none';
                 document.getElementById('wikiViewRender').style.display = '';
